@@ -16,6 +16,7 @@
 # You should have received a copy of the GNU General Public License
 # along with minqlx. If not, see <http://www.gnu.org/licenses/>.
 
+from statistics import mean
 import minqlx
 import requests
 import itertools
@@ -28,6 +29,7 @@ MAX_ATTEMPTS = 3
 CACHE_EXPIRE = 60*10 # 10 minutes TTL.
 DEFAULT_RATING = 1500
 UNTRACKED_RATING = 9999
+AD_ELO_THRESHOLD = 1400
 SUPPORTED_GAMETYPES = ("ad", "ca", "ctf", "dom", "ft", "tdm")
 # Externally supported game types. Used by !getrating for game types the API works with.
 EXT_SUPPORTED_GAMETYPES = ("ad", "ca", "ctf", "dom", "ft", "tdm", "duel", "ffa")
@@ -82,7 +84,7 @@ class balance(minqlx.Plugin):
             def f():
                 self.execute_suggestion()
             f()
-        
+
         self.in_countdown = True
 
     def handle_round_start(self, *args, **kwargs):
@@ -100,7 +102,7 @@ class balance(minqlx.Plugin):
                 if len(players["red"] + players["blue"]) % 2 != 0:
                     self.msg("Teams were ^6NOT^7 balanced due to the total number of players being an odd number.")
                     return
-                
+
                 players = dict([(p.steam_id, gt) for p in players["red"] + players["blue"]])
                 self.add_request(players, self.callback_balance, minqlx.CHAT_CHANNEL)
             f()
@@ -166,7 +168,7 @@ class balance(minqlx.Plugin):
             last_status = res.status_code
             if res.status_code != requests.codes.ok:
                 continue
-            
+
             js = res.json()
             if "players" not in js:
                 last_status = -1
@@ -181,14 +183,14 @@ class balance(minqlx.Plugin):
                 with self.ratings_lock:
                     if sid not in self.ratings:
                         self.ratings[sid] = {}
-                    
+
                     for gt in p:
                         p[gt]["time"] = t
                         p[gt]["local"] = False
                         self.ratings[sid][gt] = p[gt]
                         if self.ratings[sid][gt]["elo"] == 0 and self.ratings[sid][gt]["games"] == 0:
                             self.ratings[sid][gt]["elo"] = DEFAULT_RATING
-                        
+
                         if sid in players and gt == players[sid]:
                             # The API gave us the game type we wanted, so we remove it.
                             del players[sid]
@@ -304,13 +306,13 @@ class balance(minqlx.Plugin):
             name = player.name
         else:
             name = sid
-        
+
         channel.reply("{} has a rating of ^6{}^7 in {}.".format(name, self.ratings[sid][gametype]["elo"], gametype.upper()))
 
     def cmd_setrating(self, player, msg, channel):
         if len(msg) < 3:
             return minqlx.RET_USAGE
-        
+
         try:
             sid = int(msg[1])
             target_player = None
@@ -323,7 +325,7 @@ class balance(minqlx.Plugin):
         except minqlx.NonexistentPlayerError:
             player.tell("Invalid client ID. Use either a client ID or a SteamID64.")
             return minqlx.RET_STOP_ALL
-        
+
         try:
             rating = int(msg[2])
         except ValueError:
@@ -334,7 +336,7 @@ class balance(minqlx.Plugin):
             name = target_player.name
         else:
             name = sid
-        
+
         gt = self.game.type_short
         self.db[RATING_KEY.format(sid, gt)] = rating
 
@@ -350,7 +352,7 @@ class balance(minqlx.Plugin):
     def cmd_remrating(self, player, msg, channel):
         if len(msg) < 2:
             return minqlx.RET_USAGE
-        
+
         try:
             sid = int(msg[1])
             target_player = None
@@ -363,12 +365,12 @@ class balance(minqlx.Plugin):
         except minqlx.NonexistentPlayerError:
             player.tell("Invalid client ID. Use either a client ID or a SteamID64.")
             return minqlx.RET_STOP_ALL
-        
+
         if target_player:
             name = target_player.name
         else:
             name = sid
-        
+
         gt = self.game.type_short
         del self.db[RATING_KEY.format(sid, gt)]
 
@@ -389,7 +391,7 @@ class balance(minqlx.Plugin):
         if len(teams["red"] + teams["blue"]) % 2 != 0:
             player.tell("The total number of players should be an even number.")
             return minqlx.RET_STOP_ALL
-        
+
         players = dict([(p.steam_id, gt) for p in teams["red"] + teams["blue"]])
         self.add_request(players, self.callback_balance, minqlx.CHAT_CHANNEL)
 
@@ -453,12 +455,12 @@ class balance(minqlx.Plugin):
         if gt not in SUPPORTED_GAMETYPES:
             player.tell("This game mode is not supported by the balance plugin.")
             return minqlx.RET_STOP_ALL
-        
+
         teams = self.teams()
         if len(teams["red"]) != len(teams["blue"]):
             player.tell("Both teams should have the same number of players.")
             return minqlx.RET_STOP_ALL
-        
+
         teams = dict([(p.steam_id, gt) for p in teams["red"] + teams["blue"]])
         self.add_request(teams, self.callback_teams, channel)
 
@@ -514,7 +516,7 @@ class balance(minqlx.Plugin):
         """After the bot suggests a switch, players in question can use this to agree to the switch."""
         if self.suggested_pair and not all(self.suggested_agree):
             p1, p2 = self.suggested_pair
-            
+
             if p1 == player:
                 self.suggested_agree[0] = True
             elif p2 == player:
@@ -534,7 +536,7 @@ class balance(minqlx.Plugin):
         if gt not in EXT_SUPPORTED_GAMETYPES:
             player.tell("This game mode is not supported by the balance plugin.")
             return minqlx.RET_STOP_ALL
-        
+
         players = dict([(p.steam_id, gt) for p in self.players()])
         self.add_request(players, self.callback_ratings, channel)
 
@@ -569,6 +571,29 @@ class balance(minqlx.Plugin):
 
     def suggest_switch(self, teams, gametype):
         """Suggest a switch based on average team ratings."""
+
+        if gametype == "ad":
+            # when there is an even amount of players with elo >= AD_ELO_THRESHOLD
+            # make sure they are divided evenly over the teams
+            elos_red = [
+                (p, self.ratings[p.steam_id][gametype]["elo"]) for p in teams["red"]
+            ]
+            elos_red_high = sorted([p for p in elos_red if p[1] >= AD_ELO_THRESHOLD], key=lambda x: x[1])
+            elos_red_low = sorted([p for p in elos_red if p[1] < AD_ELO_THRESHOLD], key=lambda x: x[1])
+            elos_blue = [
+                (p, self.ratings[p.steam_id][gametype]["elo"]) for p in teams["blue"]
+            ]
+            elos_blue_high = sorted([p for p in elos_blue if p[1] >= AD_ELO_THRESHOLD], key=lambda x: x[1])
+            elos_blue_low = sorted([p for p in elos_blue if p[1] < AD_ELO_THRESHOLD], key=lambda x: x[1])
+            total_high_elos = len(elos_red_high) + len(elos_blue_high)
+
+            if total_high_elos > 1 and len(elos_red_high) != len(elos_blue_high):
+                if len(elos_red_high) > len(elos_blue_high):
+                    return ((elos_red_high[-1], elos_blue_low[-1]), 0)
+                else:
+                    return ((elos_red_low[-1], elos_blue_high[-1]), 0)
+
+
         avg_red = self.team_average(teams["red"], gametype)
         avg_blue = self.team_average(teams["blue"], gametype)
         cur_diff = abs(avg_red - avg_blue)
@@ -599,9 +624,11 @@ class balance(minqlx.Plugin):
         """Calculates the average rating of a team."""
         avg = 0
         if team:
-            for p in team:
-                avg += self.ratings[p.steam_id][gametype]["elo"]
-            avg /= len(team)
+            elos = [self.ratings[p.steam_id][gametype]["elo"] for p in team]
+            # for ad we skip the high elo players when calculating the avg
+            if gametype == "ad":
+                elos = [elo for elo in elos if elo < AD_ELO_THRESHOLD]
+            avg = mean(elos)
 
         return avg
 
@@ -612,9 +639,9 @@ class balance(minqlx.Plugin):
             p2.update()
         except minqlx.NonexistentPlayerError:
             return
-        
+
         if p1.team != "spectator" and p2.team != "spectator":
             self.switch(self.suggested_pair[0], self.suggested_pair[1])
-        
+
         self.suggested_pair = None
         self.suggested_agree = [False, False]
