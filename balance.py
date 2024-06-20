@@ -29,7 +29,7 @@ MAX_ATTEMPTS = 3
 CACHE_EXPIRE = 60*10 # 10 minutes TTL.
 DEFAULT_RATING = 1500
 UNTRACKED_RATING = 9999
-AD_ELO_THRESHOLD = 1400
+AD_ELO_THRESHOLD = 1300
 SUPPORTED_GAMETYPES = ("ad", "ca", "ctf", "dom", "ft", "tdm")
 # Externally supported game types. Used by !getrating for game types the API works with.
 EXT_SUPPORTED_GAMETYPES = ("ad", "ca", "ctf", "dom", "ft", "tdm", "duel", "ffa")
@@ -625,9 +625,6 @@ class balance(minqlx.Plugin):
         avg = 0
         if team:
             elos = [self.ratings[p.steam_id][gametype]["elo"] for p in team]
-            # for ad we skip the high elo players when calculating the avg
-            if gametype == "ad":
-                elos = [elo for elo in elos if elo < AD_ELO_THRESHOLD]
             avg = mean(elos)
 
         return avg
