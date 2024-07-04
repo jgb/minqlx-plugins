@@ -580,18 +580,27 @@ class balance(minqlx.Plugin):
             ]
             elos_red_high = sorted([p for p in elos_red if p[1] >= AD_ELO_THRESHOLD], key=lambda x: x[1])
             elos_red_low = sorted([p for p in elos_red if p[1] < AD_ELO_THRESHOLD], key=lambda x: x[1])
+            nr_elos_red_high = len(elos_red_high)
             elos_blue = [
                 (p, self.ratings[p.steam_id][gametype]["elo"]) for p in teams["blue"]
             ]
             elos_blue_high = sorted([p for p in elos_blue if p[1] >= AD_ELO_THRESHOLD], key=lambda x: x[1])
             elos_blue_low = sorted([p for p in elos_blue if p[1] < AD_ELO_THRESHOLD], key=lambda x: x[1])
-            total_high_elos = len(elos_red_high) + len(elos_blue_high)
+            nr_elos_blue_high = len(elos_blue_high)
+            total_high_elos = nr_elos_red_high + nr_elos_blue_high
+            diff_high_elos = nr_elos_red_high - nr_elos_blue_high
 
-            if total_high_elos > 1 and len(elos_red_high) != len(elos_blue_high):
-                if len(elos_red_high) > len(elos_blue_high):
-                    return ((elos_red_high[-1], elos_blue_low[-1]), 0)
+            if total_high_elos > 1:
+                if total_high_elos % 2:
+                    if diff_high_elos >= 2:
+                        return ((elos_red_high[-1], elos_blue_low[-1]), 0)
+                    elif diff_high_elos <= -2:
+                        return ((elos_red_low[-1], elos_blue_high[-1]), 0)
                 else:
-                    return ((elos_red_low[-1], elos_blue_high[-1]), 0)
+                    if diff_high_elos >= 1:
+                        return ((elos_red_high[-1], elos_blue_low[-1]), 0)
+                    elif diff_high_elos <= -1:
+                        return ((elos_red_low[-1], elos_blue_high[-1]), 0)
 
 
         avg_red = self.team_average(teams["red"], gametype)
