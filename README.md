@@ -98,5 +98,21 @@ and thus not have the client download them automatically.
   - `qlx_workshopReferences`: A comma-separated list of workshop IDs for items you want to force the client to download.
   Use this for custom resources, such as sounds packs and whatnot.
 
+## Develop
+
+To install requirements for unit testing:
+
+```
+git submodule init
+git submodule update --recursive
+python3 -m pip install mockito
+```
+
+To run unit tests, use following commands:
+
+```
+python3 -m unittest tests
+```
+
 ## Contribute
-If you create pull requests, please try to not deviate from the coding style of the plugins (e.g. don't use camelCase variable names and stuff like that), and please create the PR against the develop branch of the repository.
+If you create pull requests, please try to not deviate from the coding style of the plugins (e.g. don't use camelCase variable names and stuff like that), and please create the PR against the master branch of the repository.
