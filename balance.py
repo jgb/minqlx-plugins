@@ -573,34 +573,28 @@ class balance(minqlx.Plugin):
         """Suggest a switch based on average team ratings."""
 
         if gametype == "ad":
-            # when there is an even amount of players with elo >= AD_ELO_THRESHOLD
-            # make sure they are divided evenly over the teams
-            elos_red = [
-                (p, self.ratings[p.steam_id][gametype]["elo"]) for p in teams["red"]
-            ]
-            elos_red_high = sorted([p for p in elos_red if p[1] >= AD_ELO_THRESHOLD], key=lambda x: x[1])
-            elos_red_low = sorted([p for p in elos_red if p[1] < AD_ELO_THRESHOLD], key=lambda x: x[1])
-            nr_elos_red_high = len(elos_red_high)
-            elos_blue = [
-                (p, self.ratings[p.steam_id][gametype]["elo"]) for p in teams["blue"]
-            ]
-            elos_blue_high = sorted([p for p in elos_blue if p[1] >= AD_ELO_THRESHOLD], key=lambda x: x[1])
-            elos_blue_low = sorted([p for p in elos_blue if p[1] < AD_ELO_THRESHOLD], key=lambda x: x[1])
-            nr_elos_blue_high = len(elos_blue_high)
-            total_high_elos = nr_elos_red_high + nr_elos_blue_high
-            diff_high_elos = nr_elos_red_high - nr_elos_blue_high
+            # Special handling for AD: ensure high-ELO players are distributed evenly
+            red_high = [p for p in teams["red"] if self.ratings[p.steam_id][gametype]["elo"] >= AD_ELO_THRESHOLD]
+            blue_high = [p for p in teams["blue"] if self.ratings[p.steam_id][gametype]["elo"] >= AD_ELO_THRESHOLD]
+            red_low = [p for p in teams["red"] if self.ratings[p.steam_id][gametype]["elo"] < AD_ELO_THRESHOLD]
+            blue_low = [p for p in teams["blue"] if self.ratings[p.steam_id][gametype]["elo"] < AD_ELO_THRESHOLD]
 
-            if total_high_elos > 1:
-                if total_high_elos % 2:
-                    if diff_high_elos >= 2:
-                        return ((elos_red_high[-1], elos_blue_low[-1]), 0)
-                    elif diff_high_elos <= -2:
-                        return ((elos_red_low[-1], elos_blue_high[-1]), 0)
-                else:
-                    if diff_high_elos >= 1:
-                        return ((elos_red_high[-1], elos_blue_low[-1]), 0)
-                    elif diff_high_elos <= -1:
-                        return ((elos_red_low[-1], elos_blue_high[-1]), 0)
+            high_diff = len(red_high) - len(blue_high)
+            total_high = len(red_high) + len(blue_high)
+
+            # If we have high-ELO players and they're unevenly distributed
+            if total_high >= 2 and abs(high_diff) >= 1:
+                # Move a high-ELO player from the team with more to balance with a low-ELO player
+                if high_diff > 0 and blue_low:  # Red has more high-ELO players
+                    # Sort to get the lowest high-ELO from red and highest low-ELO from blue
+                    red_high_sorted = sorted(red_high, key=lambda p: self.ratings[p.steam_id][gametype]["elo"])
+                    blue_low_sorted = sorted(blue_low, key=lambda p: self.ratings[p.steam_id][gametype]["elo"], reverse=True)
+                    return ((red_high_sorted[0], blue_low_sorted[0]), abs(high_diff) * 100)
+                elif high_diff < 0 and red_low:  # Blue has more high-ELO players
+                    # Sort to get the lowest high-ELO from blue and highest low-ELO from red
+                    blue_high_sorted = sorted(blue_high, key=lambda p: self.ratings[p.steam_id][gametype]["elo"])
+                    red_low_sorted = sorted(red_low, key=lambda p: self.ratings[p.steam_id][gametype]["elo"], reverse=True)
+                    return ((red_low_sorted[0], blue_high_sorted[0]), abs(high_diff) * 100)
 
 
         avg_red = self.team_average(teams["red"], gametype)
